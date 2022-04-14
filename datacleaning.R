@@ -13,6 +13,8 @@ library(gdistance)
 library(abind)
 library(rje)
 library(malariaAtlas)
+library(tableone)
+library(lubridate)
 
 # read in cases
 cases <- read_csv('./Hospital Surveilance Dataset up to 30 April 2021.csv') 
@@ -216,5 +218,52 @@ ggsave('./plots/travel_time.pdf', height=4, width=4)
 #........................................####
 # Tables & Figures  ####
 #........................................
-tabledat <- caselink %>% dplyr::select()
+tabledat <- caselink %>% dplyr::select(
+  village_linking_key, hospital, hospital_f, ta, village, cluster, admission_date, sex, 
+  agem, firstadmission, admitprevno, child_have_net, 
+  sleep_under_net, sprayed_walls, fevernlast7days, preillness, hiv, 
+  heart_disease, sickle_cell, malnutrition, breathe_difficulty, alter_consciuos, 
+  convulsions, adm_weight, adm_muac, rts1, rts2, 
+  rts3, rts4, namediag, namediag1, namediag2, namediag3, outcome, outcome_date)
 
+tabledat <- tabledat %>%
+  mutate(sex = case_when(sex==1~'male',
+                         sex==0~'female'),
+         agem = case_when(agem==99~NA_real_,
+                          TRUE~agem),
+         preillness = case_when(preillness==2~NA_real_,
+                                TRUE~preillness),
+         outcome = case_when(outcome==1~'discharged/alive',
+                             outcome==2~'dead',
+                             outcome==3~'referred',
+                             outcome==4~'absconded'),
+         namediag = case_when(namediag==1~'Asthma',
+                              namediag==2~'Gastroentritis',
+                              namediag==3~'Malaria',
+                              namediag==4~'Pneumonia',
+                              namediag==5~'Severe Malaria',
+                              namediag==6~'Septicemia',
+                              namediag==7~'Sepsis',
+                              namediag==8~'Severe Pneumonia',
+                              namediag==9~'Severe anaemia secondary to malaria',
+                              namediag==10~'Sickle cell crisis',
+                              namediag==11~'Cerebral malaria',
+                              namediag==12~'Bacterial Meningitis',
+                              namediag==13~'Viral Meningitis',
+                              namediag==14~'Cryptococcal Meningitis',
+                              namediag==15~'TB Meningitis',
+                              namediag==16~'Meningitis Unspecified',
+                              namediag==95~'Other'),
+         hospstay = interval(lubridate::dmy(admission_date), lubridate::dmy_hm(outcome_date)) %/% days(1)
+         
+         )
+
+vars <- c('sex', 'preillness', 'outcome', 'namediag')
+tab1a <- tableone::CreateCatTable(vars = vars, strata = c('hospital_f'), 
+                         data = as.data.frame(tabledat), includeNA = F, test = TRUE, testExact = 'fischer.test')
+print(tab1a, showAllLevels = TRUE, formatOptions = list(big.mark = ","))
+
+vars <- c('agem', 'hospstay')
+tab1b <- tableone::CreateContTable(vars = vars, strata = c('hospital_f'), 
+                                 data = as.data.frame(tabledat), test = TRUE)
+print(tab1b, showAllLevels = TRUE, formatOptions = list(big.mark = ","))
