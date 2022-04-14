@@ -1,47 +1,36 @@
-library(excel.link)
+#........................................
+# MVIP data cleaning
+# Hillary Topazian
+# 13 April 2022
+#........................................
+
+#........................................####
+# Packages & data  ####
+#........................................
 library(sf)
 library(tidyverse)
-
-# pass <- read.table('./pass.txt') %>% as.character()
-#   
-# data <- excel.link::xl.read.file('C:/Users/htopazia/Documents/MVIP/Hospital Surveilance Dataset up to 30 April 2021.xlsx', password = pass)
+library(gdistance)
+library(abind)
+library(rje)
+library(malariaAtlas)
 
 # read in cases
-cases <- read_csv('C:/Users/htopazia/Documents/MVIP/Copy of Hospital Surveilance Dataset up to 30 April 2021.csv') 
+cases <- read_csv('./Hospital Surveilance Dataset up to 30 April 2021.csv') 
 # read in village coordinates
-villages <- read_csv('C:/Users/htopazia/Documents/MVIP/Sentinel District Village Cordinates.csv')
+villages <- read_csv('./Sentinel District Village Cordinates.csv')
 
 # match cases to village coordinates
-# Note that a village for us is defined as a combination of district, ta, village and cluster (as combined in the key column). In your file merge exercise please keep this in mind because some village names repeat in several clusters/districts and can only be distinguished through this key combination.
+# village = a combination of district, ta, village and cluster
+caselink <- cases %>% left_join(villages, by=c("village_linking_key" = "key"))
 
-nrow(cases[!is.na(cases$village),]) # 7262 with village names
-nrow(cases[is.na(cases$village),]) 
-
-caselink <- cases %>% left_join(villages, by=c("village" = "Village"))
-
-nrow(caselink[!is.na(caselink$latitude),]) # 5223 with coordinates
+nrow(caselink[!is.na(caselink$latitude),]) # 2238 with coordinates
+nrow(caselink[!is.na(caselink$village),]) # 7262 with coordinates
 
 caselink <- caselink %>% filter(!is.na(longitude)) %>% 
   st_as_sf(crs=4326, coords=c('longitude','latitude')) %>%
   mutate(hospital_f = factor(hospital, levels=c(1,2,3,4), labels=c('Ntchisi','Mchinji','Balaka','Machinga')))
 
 table(caselink$hospital, caselink$hospital_f)
-
-
-# recovering by hamming's distance
-barcodematedist <- stringdist::stringdistmatrix(
-  a=cases$village,
-  b=villages$Village,
-  method=c("hamming"),
-  useNames = c("strings"))
-barcodematedist_tbl <- cbind.data.frame(rownames(barcodematedist), barcodematedist)
-colnames(barcodematedist_tbl)[1] <- "HIVrecode_barcode"
-barcodematedist_tbl_oneoffs <- barcodematedist_tbl %>% 
-  as.tibble(.) %>% 
-  tidyr::gather(., key="qPCR_barcode", value = "stringdist", 2:ncol(.)) %>% 
-  dplyr::filter(stringdist == 1) %>% 
-  #dplyr::filter( ! c( HIVrecode_barcode == "C3S3Z" & qPCR_barcode == "C2S3Z" ) ) %>%  # manual fix, see below 
-  dplyr::select(-c(stringdist))
 
 
 malawi <- admin0 <- readRDS("./spatial/admin0.rds") %>% filter(Country == 'Malawi') %>% st_transform(4326)
@@ -53,9 +42,10 @@ st_crs(admin0)# wgs84
 
 # clusters
 balaka <- st_read('./SENTINEL DISTRICTS SHAPEFILES/Balaka/BalakaClusters.shp') %>% st_transform(4326) %>% mutate(ID="Balaka")
-machinga <- st_read('./SENTINEL DISTRICTS SHAPEFILES/Machinga/MachingaClusters.shp') %>% st_transform(4326) %>% mutate(ID="Machinga")
-ntchisi <- st_read('./SENTINEL DISTRICTS SHAPEFILES/Ntchisi/NtchisiClusters.shp') %>% st_transform(4326) %>% mutate(ID="Ntchisi")
-mchinji <- st_read('./SENTINEL DISTRICTS SHAPEFILES/Mchinji_New/MchinjiClusters.shp') %>% st_transform(4326) %>% mutate(ID="Mchinji")
+machinga <- st_read('./SENTINEL DISTRICTS SHAPEFILES/Machinga/MachingaClustersUpdated_22July2021.shp') %>% st_transform(4326) %>% mutate(ID="Machinga")
+ntchisi <- st_read('./SENTINEL DISTRICTS SHAPEFILES/Ntchisi/NtchisiClustersUpdated.shp') %>% st_transform(4326) %>% mutate(ID="Ntchisi")
+mchinji <- st_read('./SENTINEL DISTRICTS SHAPEFILES/Mchinji/MchinjiClustersUpdated_22July2021.shp') %>% st_transform(4326) %>% mutate(ID="Mchinji")
+
 
 # district hospitals
 hospital <- c('Balaka', 'Machinga', 'Ntchisi', 'Mchinji')
@@ -90,7 +80,6 @@ ggplot() +
 ggsave('./plots/clustermap.pdf', height=5, width=4)
 
 
-
 # plot cases to see if they fall near district borders -------------------------
 # plot
 ggplot() + 
@@ -112,6 +101,7 @@ ggsave('./plots/casemap.pdf', height=5, width=6)
 
 
 # calculate distance -----------------------------------------------------------
+
 calcdist <- function(DISTRICT, N) {
   
 subset <- caselink[caselink$hospital_f==DISTRICT,]
@@ -135,13 +125,96 @@ ggsave('./plots/distance.pdf', height=4, width=4)
 
 
 
-# tESTS_---------------
+#........................................####
+# MAP distance calc  ####
+#........................................
 
-district <- st_read("./GADM/gadm36_MWI_1.shp",stringsAsFactors=F) # ggplot() + geom_sf(data=district)
+# https://medium.com/@abertozz/mapping-travel-times-with-malariaatlas-and-friction-surfaces-f4960f584f08
+# download shapefile
+analysis.shp <- malariaAtlas::getShp(ISO = "MWI", admin_level = "admin0")
+plot(analysis.shp, main="Shape for Clipping")
+
+# download friction surface
+friction <- malariaAtlas::getRaster(
+  surface = "A global friction surface enumerating land-based travel speed for a nominal year 2015",
+  shp = analysis.shp)
+malariaAtlas::autoplot_MAPraster(friction)
+
+# tell function how to calculate distance and correct for globe 3D
+T <- gdistance::transition(friction, function(x) 1/mean(x), 8) 
+T.GC <- gdistance::geoCorrection(T)             
+
+# read in hospital locations
+point.locations <- read.csv(file = './hospitals.csv')
 
 
-ggplot() + 
-  geom_sf(data=balaka) + 
-  geom_sf(data=machinga) + 
-  geom_sf(data=ntchisi) +
-  geom_sf(data=mchinji)
+# create function to make surface maps
+createsurface <- function(district){
+  
+  # subset to district of interest
+  subset <- point.locations %>% filter(name==district)
+  
+  # keep only point coordinates within file bounds
+  coordinates(subset) <- ~ X_COORD + Y_COORD
+  proj4string(subset) <- proj4string(subset)
+  
+  points <- as.matrix(subset@coords)
+  
+  access.raster <- gdistance::accCost(T.GC, points)
+  
+  # write the resulting raster
+  writeRaster(access.raster, filename=paste0('./spatial/travel_time_',district,'.tif'), overwrite=TRUE)
+  
+  # extract travel times around cluster points, with a 1m buffer
+  travel <- raster::extract(access.raster, caselink, buffer=1, fun=mean)
+  
+  # plot
+  p <- malariaAtlas::autoplot_MAPraster(access.raster, 
+                                        shp_df=analysis.shp, printed=F)
+  
+  full_plot <- p[[1]] + geom_point(data=data.frame(subset@coords), 
+                                   aes(x=X_COORD, y=Y_COORD)) +
+    scale_fill_gradientn(colors = rev(rje::cubeHelix(gamma=1.0, 
+                                                     start=1.5, 
+                                                     r=-1.0, 
+                                                     hue=1.5, 
+                                                     n=16)), 
+                         name="Minutes \n of Travel") + 
+    ggtitle("Travel Time to Most Accessible Peak") +
+    theme(axis.text=element_blank(),
+          panel.border=element_rect(fill=NA, color="white"))
+  
+  print(full_plot)
+  print(travel)
+
+}
+
+# create travel time rasters
+tt_balaka <- createsurface('Balaka')
+tt_machinga <- createsurface('Machinga')
+tt_ntchisi <- createsurface('Ntchisi')
+tt_mchinji <- createsurface('Mchinji')
+
+# bind results to case dataframe
+test <- cbind(caselink, tt_balaka,tt_machinga,tt_ntchisi,tt_mchinji) %>%
+  mutate(traveltime = case_when(hospital_f=='Balaka' ~ tt_balaka,
+                                hospital_f=='Machinga' ~ tt_machinga,
+                                hospital_f=='Ntchisi' ~ tt_ntchisi,
+                                hospital_f=='Mchinji' ~ tt_mchinji))
+
+# plot travel time
+ggplot(test, aes(x=as.character(hospital_f), y=as.numeric(traveltime), color=hospital_f, fill=hospital_f)) +
+  geom_boxplot(alpha=0.3, show.legend=F) +
+  scale_y_continuous(limits=c(0, max(100, na.rm=T))) +
+  labs(x='District',
+       y='Travel time (minutes)') +
+  theme_classic() 
+
+ggsave('./plots/travel_time.pdf', height=4, width=4)
+
+
+#........................................####
+# Tables & Figures  ####
+#........................................
+tabledat <- caselink %>% dplyr::select()
+
