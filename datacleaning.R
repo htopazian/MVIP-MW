@@ -15,6 +15,8 @@ library(rje)
 library(malariaAtlas)
 library(tableone)
 library(lubridate)
+library(LaCroixColoR)
+library(cowplot)
 
 # read in cases
 cases <- read_csv('./Hospital Surveilance Dataset up to 30 April 2021.csv') 
@@ -35,8 +37,9 @@ caselink <- caselink %>% filter(!is.na(longitude)) %>%
 table(caselink$hospital, caselink$hospital_f)
 
 
-malawi <- admin0 <- readRDS("./spatial/admin0.rds") %>% filter(Country == 'Malawi') %>% st_transform(4326)
+
 admin0 <- readRDS("./spatial/admin0.rds") %>% filter(Country %in% c('Mozambique', 'Tanzania, United Republic of', 'Zambia', 'Zimbabwe')) %>% st_transform(4326)
+malawi <- readRDS("./spatial/admin0.rds") %>% filter(Country == 'Malawi') %>% st_transform(4326)
 load('./spatial/SEAfrica.rdata')
 
 st_crs(malawi) # wgs84
@@ -84,22 +87,51 @@ ggsave('./plots/clustermap.pdf', height=5, width=4)
 
 # plot cases to see if they fall near district borders -------------------------
 # plot
-ggplot() + 
-  geom_sf(data=admin0, fill="cornsilk2", color="cornsilk3") +
+# Pamplemousse = rbind(c("#EA7580","#F6A1A5","#F8CD9C","#1BB6AF","#088BBE","#172869"))
+
+g1 <- ggplot() + 
+  #geom_sf(data=admin0, fill="cornsilk2", color="cornsilk3") +
   geom_sf(data=malawi, fill="cornsilk") + 
-  geom_sf(data=lakes, fill="deepskyblue", color=NA, alpha=0.2) + 
-  geom_sf(data=malawi, fill=NA, color="tan4", size=0.75) + 
+  geom_sf(data=malawi, fill=NA, color="tan4", size=1) + 
+  geom_sf(data=balaka, fill="#172869", color=NA, alpha=0.3, show.legend = F) + 
+  geom_sf(data=machinga, fill="#088BBE", color=NA, alpha=0.3, show.legend = F) + 
+  geom_sf(data=mchinji, fill="#1BB6AF", color=NA, alpha=0.3, show.legend = F) +   
+  geom_sf(data=ntchisi, fill="#EA7580", color=NA, alpha=0.3, show.legend = F) + 
+  #geom_sf(data=lakes, fill="deepskyblue", color=NA, alpha=0.2) + 
   geom_sf(data=caselink, aes(color=hospital_f), size=.1) +   
+  scale_color_manual(values = c("#EA7580","#1BB6AF","#172869","#088BBE")) + 
   geom_sf(data=hospitals, color='black', size=1) + 
   labs(fill="", color='') + 
   theme_bw(base_size=14) + 
   scale_x_continuous(limits=c(32.5,36)) + 
   scale_y_continuous(limits=c(-15.5,-12.5)) + 
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.ticks=element_blank(), axis.text.x=element_blank(), axis.text.y=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.ticks=element_blank(), axis.text.x=element_blank(), axis.text.y=element_blank(), 
+        panel.background = element_rect(fill = "cornsilk2")) +
   guides(color = guide_legend(override.aes = list(size=1)))
 
-ggsave('./plots/casemap.pdf', height=5, width=6)
+g2 <- ggplot() + 
+  geom_sf(data=admin0, fill="cornsilk2", color="cornsilk3") +
+  geom_sf(data=malawi, fill="cornsilk") + 
+  geom_sf(data=lakes, fill="deepskyblue", color=NA, alpha=0.2) + 
+  geom_sf(data=malawi, fill=NA, color="tan4", size=0.75) + 
+  annotate("rect", xmin = 32.4, xmax = 36.2, ymin = -15.5, ymax = -12.8, fill=NA, color='black', size=.8) +
+  labs(fill="", color='') + 
+  theme_bw(base_size=14) + 
+  scale_color_manual(values = rep('black',4)) + 
+  scale_x_continuous(limits=c(32,36.5)) + 
+  scale_y_continuous(limits=c(-17.7,-8.9)) + 
+  theme_void() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        axis.ticks=element_blank(), axis.text.x=element_blank(), axis.text.y=element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA, size=1)) 
 
+gg_inset_map2 = ggdraw() +
+  draw_plot(g1) +
+  draw_plot(g2, x = 0.01, y = 0.15, width = 0.2, height = 0.3)
+
+gg_inset_map2
+
+ggsave('./plots/casemap.pdf', height=5, width=6)
 
 
 # calculate distance -----------------------------------------------------------
